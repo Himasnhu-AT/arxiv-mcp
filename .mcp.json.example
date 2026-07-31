@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "arxiv": {
+      "command": "uv",
+      "args": ["run", "--directory", "/Users/himanshu/codes/synthai/arxiv-mcp", "arxiv-mcp"],
+      "env": {
+        "ARXIV_MCP_MAX_PAPERS": "200",
+        "ARXIV_MCP_MAX_DISK_MB": "2048"
+      }
+    }
+  }
+}
