@@ -92,34 +92,60 @@ def pdf_to_text(data: bytes) -> str:
     return "\n\n".join(parts).strip()
 
 
-# Below a threshold the HTML is almost certainly a "no HTML available" stub.
-_MIN_HTML_TEXT = 500
+# arXiv serves a 200-status *stub* (feedback-form chrome, or an ar5iv
+# "See pages 1-last of …" PDF passthrough) when a paper has no real HTML render.
+# Those stubs are short and/or carry telltale markers, so we reject them and fall
+# through to the PDF, which is always available. The threshold is deliberately
+# generous: the cost of rejecting a genuine-but-short HTML render is merely using
+# the PDF instead, which is fine.
+_MIN_HTML_TEXT = 8000
+_STUB_MARKERS = (
+    "see pages 1-last of",       # ar5iv failed to convert; it just embeds the PDF
+    "html is not available for the source",
+    "no html for",
+)
+
+
+def _is_real_fulltext(text: str) -> bool:
+    if len(text) < _MIN_HTML_TEXT:
+        return False
+    low = text[:2000].lower()
+    return not any(m in low for m in _STUB_MARKERS)
+
+
+async def _try_html(url: str, key: str, client: ArxivClient) -> str | None:
+    status, body = await client.fetch_text(url, key=key)
+    if status != 200:
+        return None
+    text = html_to_text(body)
+    return text if _is_real_fulltext(text) else None
 
 
 async def extract_full_text(aid: ArxivId, client: ArxivClient, cache: Cache) -> tuple[str, str]:
     """Return ``(text, method)``, using and populating the cache. ``method`` is one
-    of ``html``, ``ar5iv``, ``pdf``, or ``cache``."""
+    of ``html``, ``ar5iv``, ``pdf``, or ``cache``.
+
+    Prefers arXiv's LaTeXML HTML, then ar5iv, then falls back to the PDF. HTML
+    sources are only accepted when they carry a real render (not a stub); the PDF
+    is the reliable backstop for older / PDF-only papers.
+    """
     cached = cache.get_text(aid)
     if cached is not None:
         return cached, "cache"
 
-    # 1. arXiv LaTeXML HTML.
-    status, body = await client.fetch_text(aid.html_url, key=f"html:{aid.canonical}")
-    if status == 200:
-        text = html_to_text(body)
-        if len(text) >= _MIN_HTML_TEXT:
-            cache.set_text(aid, text)
-            return text, "html"
+    # 1. arXiv LaTeXML HTML (cleanest when it exists).
+    text = await _try_html(aid.html_url, f"html:{aid.canonical}", client)
+    if text is not None:
+        cache.set_text(aid, text)
+        return text, "html"
 
-    # 2. ar5iv fallback.
-    status, body = await client.fetch_text(aid.ar5iv_url, key=f"ar5iv:{aid.canonical}")
-    if status == 200:
-        text = html_to_text(body)
-        if len(text) >= _MIN_HTML_TEXT:
-            cache.set_text(aid, text)
-            return text, "ar5iv"
+    # 2. ar5iv (broader historical coverage).
+    text = await _try_html(aid.ar5iv_url, f"ar5iv:{aid.canonical}", client)
+    if text is not None:
+        cache.set_text(aid, text)
+        return text, "ar5iv"
 
-    # 3. PDF.
+    # 3. PDF — always available.
     pdf_path = cache.get_pdf(aid)
     if pdf_path is not None:
         data = pdf_path.read_bytes()

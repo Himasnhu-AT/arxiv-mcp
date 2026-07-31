@@ -35,8 +35,15 @@ class ArxivClient:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-    async def _get(self, url: str, params: dict | None = None) -> httpx.Response:
-        """Rate-limited GET with 503/Retry-After back-off and retries."""
+    async def _get(
+        self, url: str, params: dict | None = None, raise_for_client_error: bool = True
+    ) -> httpx.Response:
+        """Rate-limited GET with 503/Retry-After back-off and retries.
+
+        4xx responses raise by default. Callers that treat a 404 as "this source
+        isn't available, try the next one" (e.g. HTML/ar5iv extraction) pass
+        ``raise_for_client_error=False`` to get the response back instead.
+        """
         last_exc: Exception | None = None
         for attempt in range(_MAX_RETRIES):
             await self.limiter.acquire()
@@ -51,6 +58,8 @@ class ArxivClient:
                 delay = float(retry_after) if retry_after and retry_after.isdigit() else 3.0 * (attempt + 1)
                 self.limiter.note_retry_after(delay)
                 continue
+            if 400 <= resp.status_code < 500 and not raise_for_client_error:
+                return resp
             if resp.status_code >= 400:
                 resp.raise_for_status()
             return resp
@@ -115,8 +124,10 @@ class ArxivClient:
         return await self._sf.do(f"bytes:{key}", _do)
 
     async def fetch_text(self, url: str, key: str) -> tuple[int, str]:
+        """Fetch a text resource, returning ``(status, body)``. A 404 (source not
+        available) is returned rather than raised so callers can fall back."""
         async def _do() -> tuple[int, str]:
-            resp = await self._get(url)
+            resp = await self._get(url, raise_for_client_error=False)
             return resp.status_code, resp.text
 
         return await self._sf.do(f"text:{key}", _do)
