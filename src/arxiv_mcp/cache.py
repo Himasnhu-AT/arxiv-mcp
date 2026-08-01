@@ -51,7 +51,7 @@ class CacheConfig:
 class Cache:
     def __init__(self, config: CacheConfig | None = None) -> None:
         self.cfg = config or CacheConfig()
-        self.root = self.cfg.root
+        self.root = Path(self.cfg.root)
         for sub in ("meta", "text", "pdf", "src"):
             (self.root / sub).mkdir(parents=True, exist_ok=True)
         self._index_path = self.root / "index.json"

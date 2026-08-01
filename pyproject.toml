@@ -16,6 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 # Faster/higher-quality PDF extraction. AGPL-3.0 — opt-in only.
 fast = ["pymupdf>=1.24"]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
 
 [project.scripts]
 arxiv-mcp = "arxiv_mcp.server:main"
